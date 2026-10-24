@@ -14,9 +14,9 @@ Docs: `README.md` (Russian, deployment), `docs/ARCHITECTURE.md` (index; one file
 per subject in `docs/ARCHITECTURE/` — module map, data flow, templates,
 conventions), `docs/QUIZ.md` (creating a practice task over the API and every
 available requirement check), `docs/DEVELOPMENT.md` (running tests on a rootless
-Linux host, no Docker), `docs/FUNCTIONAL_TESTS.md`, `docs/BACKEND_TESTS.md`
-(per-file test inventory), `docs/GIT.md`, `docs/REQUIREMENTS.md` (specification
-index, one file per subject in `docs/REQUIREMENTS/`).
+host with podman or docker, no compose), `docs/FUNCTIONAL_TESTS.md`,
+`docs/BACKEND_TESTS.md` (per-file test inventory), `docs/REQUIREMENTS.md`
+(specification index, one file per subject in `docs/REQUIREMENTS/`).
 
 Lint commands, ruff/ty config, CI triggers, test selection, coverage gates and
 per-workflow environment setup are all defined in `.github/workflows/*.yml` and
@@ -39,21 +39,25 @@ change often. Everything below is only what those files cannot tell you.
 - Backend tests split at direct calls to `run_miminet`: below it — no root, no
   Mininet, ~1 s; above it — root, Mininet, OVS and a built `mimidump`, and you
   must finish with `mn -c`. Without root on the host use
-  `scripts/back-test.sh build` → `test`.
+  `scripts/back-test.sh build` → `test` (it also provides `collect` and a
+  containerized dev `worker`).
 - Backend test imports are inconsistent (`from src.tasks import ...` in some
   files, `from node_types import ...` in others). Don't unify them — follow the
   file you are editing.
 - The same E2E functionality is covered twice: Selenium in `front/tests/` and
-  Playwright in `front/tests/playwright/` (they share `utils/networks.py`, and
-  the locators are duplicated in both `utils/locators.py` copies). A UI change
-  usually means touching both.
+  Playwright in `front/tests/playwright/`. Each suite has its own
+  `utils/locators.py` and `utils/networks.py` copies — a UI change usually
+  means touching both. New Selenium tests must be flat `test_*.py` files
+  directly in `front/tests/`: the CI shard discovery in `full_test.yml` looks
+  only at that level, not subdirectories.
 - Never take more than 4 Playwright workers — the tests compete for the single
   `selenium`/`password` account and start failing.
 - `TEST_TARGET_HOST` defaults to `172.18.0.2`, which is nginx inside the docker
   network and answers 502 from the host. `run.sh` substitutes `127.0.0.1`; a
   manual pytest invocation does not.
-- Auth tests live outside the test directories (`front/src/auth_tests/`) and
-  need the `CLIENT_YANDEX` and `BOT_TOKEN` secrets — they cannot run locally.
+- Auth tests live outside the test directories (`front/src/auth_tests/`). CI
+  runs them with the `CLIENT_YANDEX` secret; locally they fall back to dummy
+  Yandex credentials.
 - A new browser-free frontend test only reaches the coverage job after being
   listed explicitly in `.github/workflows/front_coverage.yml`.
 
@@ -72,9 +76,10 @@ change often. Everything below is only what those files cannot tell you.
   `front/src/app.py`, but `migrations/` is not committed — you need
   `flask db init` before `flask db migrate` (all of it inside the `miminet`
   container).
-- `.gitignore` contains `.*`, `*.ini` and `__init__.py`. The `pytest.ini` and
-  `__init__.py` files that are in the repo were force-added; new ones need
-  `git add -f`.
+- `.gitignore` contains `.*`, `*.ini` and `__init__.py`. Only a few dot-paths
+  are re-included there: `.python-version`, `.team` and `.github`. Any other
+  dot-prefixed file (like the force-added `pytest.ini` and `__init__.py`)
+  needs `git add -f`.
 - `back/ovs-init.sh` is the single source of truth for starting OVS (image,
   local harness and CI). A second `ovs-vswitchd` breaks STP/RSTP ("No such RSTP
   object"), so do not duplicate that startup logic.
@@ -82,8 +87,26 @@ change often. Everything below is only what those files cannot tell you.
 
 ## Git and workflow
 
-- Docs and code comments are written in English. `README.md` and
-  `docs/*_TESTS.md` are still Russian — leave them as they are, but write
-  anything new in English.
-- Branch naming rules — `docs/GIT.md`. Read it before creating a branch.
-- Commit messages are in English: `<scope>: <description> (#<issue>)`.
+- Docs and code comments are written in English. `README.md`,
+  `docs/*_TESTS.md` and the team-facing files (`.team/*`, GitHub templates in
+  `.github/`) are Russian by team decision — leave them as they are; new docs
+  still go in English.
+- Commit messages are in English, Conventional-Commits style
+  (`fix(front): ...`, `docs: ...`), usually with the issue number. The old
+  branch-naming guide (`docs/GIT.md`) was removed — no branch rules are
+  documented.
+
+## Team rules
+
+- Branches follow `<role>/<issue>-<slug>`, where `role` is the member
+  nickname, e.g. `leonid/534-quiz-grading`.
+- No direct commits or pushes to `main` — every change goes through a PR
+  (`.github/pull_request_template.md`).
+- Never read or commit secrets: `vk_auth.json`, `miminet_secret.conf`,
+  `client_yandex.json`, `front/.env`, `back/.env`. `opencode.json` denies
+  agent `read`/`edit` on these paths; any shell command still requires human
+  approval. A leaked secret is replaced, not edited out of history.
+- A handoff is mandatory at the end of every work session: fill in
+  `.team/templates/handoff.md` (the completed text goes into the PR) and add
+  one row to `.team/session-log.md`. Work without a recorded handoff is not
+  finished.
